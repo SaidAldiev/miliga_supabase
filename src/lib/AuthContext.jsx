@@ -20,28 +20,41 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     let isMounted = true;
 
+    /**
+     * IMPORTANT (Supabase Auth lock):
+     * Do NOT make awaited Supabase calls inside `onAuthStateChange`.
+     * Supabase uses an internal async lock (navigator.locks). Awaiting inside
+     * the callback can cause deadlocks / "The provided callback is no longer runnable".
+     *
+     * Workaround: keep the callback synchronous and do async work AFTER it returns
+     * (e.g. setTimeout(..., 0)).
+     */
+    const hydrateAppUser = async () => {
+      // Hydrate app-level user object (includes profiles fields)
+      const me = await api.auth.me();
+      return me;
+    };
+
     const bootstrap = async () => {
       setIsLoadingAuth(true);
       setAuthError(null);
 
       try {
-        const { data } = await supabase.auth.getSession();
-        const session = data?.session;
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
 
+        const session = data?.session;
         if (!session?.user) {
           if (!isMounted) return;
           setUser(null);
           setIsAuthenticated(false);
-          setIsLoadingAuth(false);
           return;
         }
 
-        // Hydrate app-level user object (includes profiles fields)
-        const me = await api.auth.me();
+        const me = await hydrateAppUser();
         if (!isMounted) return;
         setUser(me);
         setIsAuthenticated(true);
-        setIsLoadingAuth(false);
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error('Auth bootstrap failed:', e);
@@ -49,35 +62,52 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setIsAuthenticated(false);
         setAuthError({ type: 'auth_required', message: 'Authentication required' });
-        setIsLoadingAuth(false);
+      } finally {
+        // Always end loading, even if Supabase throws.
+        if (isMounted) setIsLoadingAuth(false);
       }
     };
 
     bootstrap();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      try {
-        if (!session?.user) {
-          setUser(null);
-          setIsAuthenticated(false);
-          setAuthError(null);
-          setIsLoadingAuth(false);
-          return;
-        }
-        setIsLoadingAuth(true);
-        const me = await api.auth.me();
-        setUser(me);
-        setIsAuthenticated(true);
-        setAuthError(null);
-        setIsLoadingAuth(false);
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('Auth state change handler failed:', e);
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Keep this callback synchronous.
+      if (!isMounted) return;
+
+      if (!session?.user) {
         setUser(null);
         setIsAuthenticated(false);
-        setAuthError({ type: 'auth_required', message: 'Authentication required' });
+        setAuthError(null);
         setIsLoadingAuth(false);
+        return;
       }
+
+      // Session exists: mark as authenticated immediately.
+      setIsAuthenticated(true);
+      setAuthError(null);
+      setIsLoadingAuth(true);
+
+      // Defer async calls until AFTER the callback returns to avoid Supabase lock issues.
+      setTimeout(() => {
+        (async () => {
+          try {
+            const me = await hydrateAppUser();
+            if (!isMounted) return;
+            setUser(me);
+            setIsAuthenticated(true);
+            setAuthError(null);
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('Auth state change hydration failed:', e);
+            if (!isMounted) return;
+            setUser(null);
+            setIsAuthenticated(false);
+            setAuthError({ type: 'auth_required', message: 'Authentication required' });
+          } finally {
+            if (isMounted) setIsLoadingAuth(false);
+          }
+        })();
+      }, 0);
     });
 
     return () => {

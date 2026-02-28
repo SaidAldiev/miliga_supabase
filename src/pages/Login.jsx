@@ -64,12 +64,12 @@ export default function Login() {
         password,
         options: {
           // After email confirmation, Supabase redirects back to the app.
-           emailRedirectTo: `${window.location.origin}${redirectTo}`,
+          // emailRedirectTo: `${window.location.origin}${redirectTo}`,
         },
       });
       console.log("I am here")
       if (error)  {
-        console.log(error)
+        console.log("I am here")
         throw error;
       }
       toast.success('Check your email to confirm your account');
