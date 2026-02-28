@@ -130,7 +130,9 @@ export default function LiveMatch() {
       set_history: match.set_history,
       total_points_team1: match.total_points_team1,
       total_points_team2: match.total_points_team2,
-      point_log: match.point_log,
+      // NOTE:
+      // Base44 previously stored a per-point log (match.point_log). Our Supabase schema
+      // does NOT include a `point_log` column, so we must not read/write it.
     }]);
 
     let newMatch = { ...match };
@@ -145,17 +147,11 @@ export default function LiveMatch() {
     
     const nextPoint = getNextPoint(currentPoint, opponentPoint, currentPoint === '40' && opponentPoint === '40');
 
-    // Build point log entry
-    const currentSetIndex = (newMatch.set_history || []).length;
-    const currentGameInSet = newMatch.team1_games + newMatch.team2_games;
-    let pointResult = 'point';
-
     if (nextPoint === 'WIN') {
       // Won the game
       newMatch[`${scoringTeam}_games`] += 1;
       newMatch.team1_points = '0';
       newMatch.team2_points = '0';
-      pointResult = 'game';
 
       // Check for set win
       const scoringGames = newMatch[`${scoringTeam}_games`];
@@ -170,15 +166,12 @@ export default function LiveMatch() {
         newMatch.set_history = [...(newMatch.set_history || []), setResult];
         newMatch.team1_games = 0;
         newMatch.team2_games = 0;
-        pointResult = 'set';
 
         if (newMatch[`${scoringTeam}_sets`] >= newMatch.sets_to_win) {
           newMatch.status = 'completed';
           newMatch.winner = scoringTeam;
-          newMatch.completed_at = new Date().toISOString();
           setWinner(scoringTeam);
           setShowWinnerModal(true);
-          pointResult = 'match';
         }
       }
     } else if (opponentPoint === 'AD') {
@@ -187,16 +180,9 @@ export default function LiveMatch() {
       newMatch[`${scoringTeam}_points`] = nextPoint;
     }
 
-    // Append to point log
-    const logEntry = {
-      team: scoringTeam,
-      set: currentSetIndex + 1,
-      game: currentGameInSet + 1,
-      team1_points_before: currentPoint === undefined || scoringTeam === 'team1' ? match.team1_points : match.team1_points,
-      team2_points_before: scoringTeam === 'team2' ? match.team2_points : match.team2_points,
-      result: pointResult,
-    };
-    newMatch.point_log = [...(newMatch.point_log || []), logEntry];
+    // Persist updated score to Supabase.
+    // IMPORTANT: only update columns that actually exist in Supabase.
+    newMatch.updated_date = new Date().toISOString();
 
     updateMutation.mutate(newMatch);
   }, [match, getNextPoint, updateMutation]);
@@ -221,11 +207,13 @@ export default function LiveMatch() {
     
     setShowEndDialog(false);
 
+    // NOTE: Supabase schema doesn't include `completed_at`.
+    // We store "end time" in updated_date.
     await api.entities.Match.update(matchId, {
       ...match,
       status: 'completed',
       winner: winnerTeam,
-      completed_at: new Date().toISOString()
+      updated_date: new Date().toISOString(),
     });
 
     toast.success('Match ended');
@@ -235,7 +223,7 @@ export default function LiveMatch() {
   const handleDiscardMatch = () => {
     updateMutation.mutate({
       status: 'cancelled',
-      completed_at: new Date().toISOString()
+      updated_date: new Date().toISOString(),
     });
     
     setShowDiscardDialog(false);

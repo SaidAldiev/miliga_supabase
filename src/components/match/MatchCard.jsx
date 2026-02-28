@@ -37,7 +37,8 @@ export default function MatchCard({ match, onClick }) {
           </Badge>
         ) : (
           <Badge variant="outline" className="text-slate-400 border-white/10 backdrop-blur-xl bg-white/5">
-            {format(new Date(match.completed_at || match.created_date), 'MMM d')}
+            {/* Supabase schema doesn't include Base44's `completed_at`; use updated_date as completion timestamp. */}
+            {format(new Date(match.updated_date || match.created_date), 'MMM d')}
           </Badge>
         )}
       </div>

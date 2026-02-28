@@ -75,20 +75,14 @@ export default function Statistics() {
         else if (match.winner === 'team1') losses++;
       }
 
-      if (match.point_log?.length) {
-        match.point_log.forEach(entry => {
-          const myTeam = isTeam1 ? 'team1' : 'team2';
-          if (entry.team === myTeam) gamePointsWon++;
-          else gamePointsConceded++;
-        });
+      // Supabase schema doesn't include Base44's `point_log` column.
+      // Use the persisted totals instead.
+      if (isTeam1) {
+        gamePointsWon += match.total_points_team1 || 0;
+        gamePointsConceded += match.total_points_team2 || 0;
       } else {
-        if (isTeam1) {
-          gamePointsWon += match.total_points_team1 || 0;
-          gamePointsConceded += match.total_points_team2 || 0;
-        } else {
-          gamePointsWon += match.total_points_team2 || 0;
-          gamePointsConceded += match.total_points_team1 || 0;
-        }
+        gamePointsWon += match.total_points_team2 || 0;
+        gamePointsConceded += match.total_points_team1 || 0;
       }
     });
 
